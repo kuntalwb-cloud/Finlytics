@@ -11,19 +11,22 @@ import { VolatilityLabView } from './components/VolatilityLabView';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { runFullAnalysisPipeline } from './engine/pipeline';
 import { FullAnalysisResult, ModelId, ParsedDataset, SeriesFrequency } from './types/timeseries';
-import { buildSeriesFromRows, parseFinancialFile } from './utils/dataParser';
+import { buildSeriesFromRows, parseFinancialFile, loadSampleDataset } from './utils/dataParser';
 
 export default function App() {
   // Show welcome screen initially until user clicks "Enter Workspace"
   const [showWelcome, setShowWelcome] = useState<boolean>(true);
 
-  const [dataset, setDataset] = useState<ParsedDataset | null>(null);
-  const [dateCol, setDateCol] = useState<string>('');
-  const [priceCol, setPriceCol] = useState<string>('');
-  const [frequency, setFrequency] = useState<SeriesFrequency>('daily');
+  const initialSample = loadSampleDataset('daily_equity');
+  const initialResult = runFullAnalysisPipeline(initialSample.fileName, initialSample.series, 'daily', 0.15);
+
+  const [dataset, setDataset] = useState<ParsedDataset | null>(initialSample);
+  const [dateCol, setDateCol] = useState<string>(initialSample.detectedDateCol);
+  const [priceCol, setPriceCol] = useState<string>(initialSample.detectedPriceCol);
+  const [frequency, setFrequency] = useState<SeriesFrequency>(initialSample.detectedFrequency);
   const [holdoutRatio, setHoldoutRatio] = useState<number>(0.15);
 
-  const [analysisResult, setAnalysisResult] = useState<FullAnalysisResult | null>(null);
+  const [analysisResult, setAnalysisResult] = useState<FullAnalysisResult | null>(initialResult);
 
   const [activeTab, setActiveTab] = useState<WorkspaceTab>('overview');
   const [selectedModel, setSelectedModel] = useState<Exclude<ModelId, 'ensemble'>>('arima');

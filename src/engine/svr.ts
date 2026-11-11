@@ -13,9 +13,11 @@ interface SvrModel {
 }
 
 function rbfKernel(a: number[], b: number[], gamma: number): number {
+  if (!a || !b) return 0;
   let sq = 0;
-  for (let i = 0; i < a.length; i++) {
-    const d = a[i] - b[i];
+  const len = Math.min(a.length, b.length);
+  for (let i = 0; i < len; i++) {
+    const d = (a[i] ?? 0) - (b[i] ?? 0);
     sq += d * d;
   }
   return Math.exp(-gamma * sq);
@@ -49,7 +51,7 @@ function trainSvrDual(
     let maxDelta = 0;
     for (let i = 0; i < n; i++) {
       const err = f[i] - y[i]; // prediction without bias minus target
-      const diag = K[i][i] + 1e-6;
+      const diag = (K[i]?.[i] ?? 1) + 1e-6;
       const oldBeta = beta[i];
       let newBeta = oldBeta;
 
@@ -70,7 +72,7 @@ function trainSvrDual(
       if (Math.abs(delta) > 1e-7) {
         beta[i] = newBeta;
         for (let j = 0; j < n; j++) {
-          f[j] += delta * K[i][j];
+          f[j] += delta * (K[i]?.[j] ?? 0);
         }
         if (Math.abs(delta) > maxDelta) maxDelta = Math.abs(delta);
       }
@@ -107,22 +109,26 @@ function trainSvrDual(
 }
 
 function predictSvr(model: SvrModel, x: number[]): number {
+  if (!x) return model.bias;
   let sum = model.bias;
   for (let k = 0; k < model.supportIndices.length; k++) {
     const i = model.supportIndices[k];
-    sum += model.alphaDiff[i] * rbfKernel(model.trainX[i], x, model.gamma);
+    const trainVec = model.trainX[i];
+    if (trainVec) {
+      sum += (model.alphaDiff[i] ?? 0) * rbfKernel(trainVec, x, model.gamma);
+    }
   }
   return sum;
 }
 
 function buildFeatureVector(windowPrices: number[], lookback: number): number[] {
   const len = windowPrices.length;
-  const last = windowPrices[len - 1];
-  const prev = windowPrices[Math.max(0, len - 2)];
+  const last = windowPrices[len - 1] ?? 100;
+  const prev = windowPrices[Math.max(0, len - 2)] ?? last;
   const rets: number[] = [];
   for (let l = 1; l <= lookback; l++) {
-    const p1 = windowPrices[len - l];
-    const p0 = windowPrices[Math.max(0, len - l - 1)];
+    const p1 = windowPrices[len - l] ?? last;
+    const p0 = windowPrices[Math.max(0, len - l - 1)] ?? p1;
     rets.push(Math.log(Math.max(1e-6, p1) / Math.max(1e-6, p0)));
   }
   const sma5 = mean(windowPrices.slice(-Math.min(5, len)));
@@ -131,7 +137,7 @@ function buildFeatureVector(windowPrices: number[], lookback: number): number[] 
   const momentum10 = (last - sma10) / Math.max(1e-6, sma10);
   const recentRets: number[] = [];
   for (let i = Math.max(1, len - 10); i < len; i++) {
-    recentRets.push(Math.log(Math.max(1e-6, windowPrices[i]) / Math.max(1e-6, windowPrices[i - 1])));
+    recentRets.push(Math.log(Math.max(1e-6, windowPrices[i] ?? last) / Math.max(1e-6, windowPrices[i - 1] ?? last)));
   }
   const vol10 = stdDev(recentRets, false);
   const oneStepRet = Math.log(Math.max(1e-6, last) / Math.max(1e-6, prev));
@@ -156,7 +162,7 @@ export function runSvrModel(
     const indices: number[] = [];
     for (let t = lookback + 1; t < endIdx; t++) {
       const feat = buildFeatureVector(prices.slice(0, t), lookback);
-      const targetRet = Math.log(Math.max(1e-6, prices[t]) / Math.max(1e-6, prices[t - 1]));
+      const targetRet = Math.log(Math.max(1e-6, prices[t] ?? 1) / Math.max(1e-6, prices[t - 1] ?? 1));
       XRaw.push(feat);
       yRaw.push(targetRet);
       indices.push(t);
@@ -173,7 +179,7 @@ export function runSvrModel(
   const featStds = new Array(numFeat).fill(1);
   if (trainXRaw.length > 0) {
     for (let j = 0; j < numFeat; j++) {
-      const col = trainXRaw.map((r) => r[j]);
+      const col = trainXRaw.map((r) => r[j] ?? 0);
       featMeans[j] = mean(col);
       featStds[j] = Math.max(1e-5, stdDev(col, false));
     }
@@ -181,16 +187,16 @@ export function runSvrModel(
   const yMean = trainYRaw.length > 0 ? mean(trainYRaw) : 0;
   const yStd = trainYRaw.length > 0 ? Math.max(1e-5, stdDev(trainYRaw, false)) : 0.02;
 
-  const scaleX = (row: number[]) => row.map((v, j) => (v - featMeans[j]) / featStds[j]);
+  const scaleX = (row: number[]) => row.map((v, j) => (v - (featMeans[j] ?? 0)) / (featStds[j] ?? 1));
   const allTrainX = trainXRaw.map(scaleX);
   const allTrainY = trainYRaw.map((v) => (v - yMean) / yStd);
 
   // Window to recent 160 samples for maximum speed & contemporary regime relevance
-  const sampleLimit = Math.min(160, allTrainX.length);
-  const trainX = allTrainX.slice(allTrainX.length - sampleLimit);
-  const trainY = allTrainY.slice(allTrainY.length - sampleLimit);
+  const sampleLimit = Math.min(160, Math.max(1, allTrainX.length));
+  const trainX = allTrainX.slice(Math.max(0, allTrainX.length - sampleLimit));
+  const trainY = allTrainY.slice(Math.max(0, allTrainY.length - sampleLimit));
 
-  const bestParams = { c: 2.0, eps: 0.1, gamma: 1 / numFeat };
+  const bestParams = { c: 2.0, eps: 0.1, gamma: 1 / Math.max(1, numFeat) };
 
   // Fit on recent training window for holdout evaluation
   const trainModel = trainSvrDual(trainX, trainY, bestParams.c, bestParams.eps, bestParams.gamma, 35);
@@ -202,10 +208,10 @@ export function runSvrModel(
     const feat = scaleX(buildFeatureVector(prices.slice(0, idx), lookback));
     const predRet = predictSvr(trainModel, feat) * yStd + yMean;
     const clampedRet = Math.max(-0.25, Math.min(0.25, predRet));
-    const predPrice = prices[idx - 1] * Math.exp(clampedRet);
-    holdoutActual.push(prices[idx]);
+    const predPrice = (prices[idx - 1] ?? 100) * Math.exp(clampedRet);
+    holdoutActual.push(prices[idx] ?? 100);
     holdoutPredicted.push(predPrice);
-    holdoutPrev.push(prices[idx - 1]);
+    holdoutPrev.push(prices[idx - 1] ?? 100);
   }
 
   // Refit on recent window of FULL dataset for final fitted curve & horizon forecast
@@ -213,35 +219,40 @@ export function runSvrModel(
   const fullFeatMeans = new Array(numFeat).fill(0);
   const fullFeatStds = new Array(numFeat).fill(1);
   for (let j = 0; j < numFeat; j++) {
-    const col = fullXRaw.map((r) => r[j]);
+    const col = fullXRaw.map((r) => r[j] ?? 0);
     fullFeatMeans[j] = mean(col);
     fullFeatStds[j] = Math.max(1e-5, stdDev(col, false));
   }
-  const fullYMean = mean(fullYRaw);
-  const fullYStd = Math.max(1e-5, stdDev(fullYRaw, false));
-  const scaleFullX = (row: number[]) => row.map((v, j) => (v - fullFeatMeans[j]) / fullFeatStds[j]);
+  const fullYMean = fullYRaw.length > 0 ? mean(fullYRaw) : 0;
+  const fullYStd = fullYRaw.length > 0 ? Math.max(1e-5, stdDev(fullYRaw, false)) : 0.02;
+  const scaleFullX = (row: number[]) => row.map((v, j) => (v - (fullFeatMeans[j] ?? 0)) / (fullFeatStds[j] ?? 1));
 
   const allFullX = fullXRaw.map(scaleFullX);
   const allFullY = fullYRaw.map((v) => (v - fullYMean) / fullYStd);
-  const fullSampleLimit = Math.min(160, allFullX.length);
-  const fullX = allFullX.slice(allFullX.length - fullSampleLimit);
-  const fullY = allFullY.slice(allFullY.length - fullSampleLimit);
+  const fullSampleLimit = Math.min(160, Math.max(1, allFullX.length));
+  const fullX = allFullX.slice(Math.max(0, allFullX.length - fullSampleLimit));
+  const fullY = allFullY.slice(Math.max(0, allFullY.length - fullSampleLimit));
+  const slicedFullIndices = fullIndices.slice(Math.max(0, fullIndices.length - fullSampleLimit));
+
   const fullModel = trainSvrDual(fullX, fullY, bestParams.c, bestParams.eps, bestParams.gamma, 35);
 
   const fitted = [...prices];
   const residuals = new Array(n).fill(0);
-  for (let k = 0; k < fullIndices.length; k++) {
-    const t = fullIndices[k];
-    const predRet = predictSvr(fullModel, fullX[k]) * fullYStd + fullYMean;
-    const predPrice = prices[t - 1] * Math.exp(Math.max(-0.25, Math.min(0.25, predRet)));
-    fitted[t] = predPrice;
-    residuals[t] = prices[t] - predPrice;
+  for (let k = 0; k < slicedFullIndices.length; k++) {
+    const t = slicedFullIndices[k];
+    const xVec = fullX[k];
+    if (t !== undefined && xVec) {
+      const predRet = predictSvr(fullModel, xVec) * fullYStd + fullYMean;
+      const predPrice = (prices[t - 1] ?? 100) * Math.exp(Math.max(-0.25, Math.min(0.25, predRet)));
+      fitted[t] = predPrice;
+      residuals[t] = (prices[t] ?? 100) - predPrice;
+    }
   }
 
   const resStd = Math.max(1e-6, stdDev(residuals.slice(lookback + 1), true));
 
   // Recursive multi-step forecast
-  const futureDates = generateFutureDates(series[n - 1].date, frequency, horizonSteps);
+  const futureDates = generateFutureDates(series[n - 1]?.date ?? '2026-01-01', frequency, horizonSteps);
   const forecast: ForecastPoint[] = [];
   const priceCursor = [...prices];
 
@@ -249,13 +260,14 @@ export function runSvrModel(
     const feat = scaleFullX(buildFeatureVector(priceCursor, lookback));
     const predRet = predictSvr(fullModel, feat) * fullYStd + fullYMean;
     const clampedRet = Math.max(-0.18, Math.min(0.18, predRet));
-    const nextPrice = Math.max(1e-4, priceCursor[priceCursor.length - 1] * Math.exp(clampedRet));
+    const lastP = priceCursor[priceCursor.length - 1] ?? 100;
+    const nextPrice = Math.max(1e-4, lastP * Math.exp(clampedRet));
     priceCursor.push(nextPrice);
 
     const band = 1.96 * resStd * Math.sqrt(h + 1);
     forecast.push({
       step: h + 1,
-      date: futureDates[h],
+      date: futureDates[h] ?? `Step ${h + 1}`,
       point: nextPrice,
       lower95: Math.max(1e-4, nextPrice - band),
       upper95: nextPrice + band,
@@ -274,22 +286,26 @@ export function runSvrModel(
   const rawImp = featureNames.map((_, j) => {
     let diffSq = 0;
     for (let i = 0; i < fullX.length; i++) {
-      const perturbed = [...fullX[i]];
-      perturbed[j] = 0;
-      const p = predictSvr(fullModel, perturbed);
-      diffSq += Math.pow(basePreds[i] - p, 2);
+      const rowVec = fullX[i];
+      if (rowVec) {
+        const perturbed = [...rowVec];
+        perturbed[j] = 0;
+        const p = predictSvr(fullModel, perturbed);
+        diffSq += Math.pow((basePreds[i] ?? 0) - p, 2);
+      }
     }
     return Math.sqrt(diffSq / Math.max(1, fullX.length));
   });
   const totalImp = Math.max(1e-8, rawImp.reduce((a, b) => a + b, 0));
   const featureImportance = featureNames
-    .map((feature, idx) => ({ feature, weight: (rawImp[idx] / totalImp) * 100 }))
+    .map((feature, idx) => ({ feature, weight: ((rawImp[idx] ?? 0) / totalImp) * 100 }))
     .sort((a, b) => b.weight - a.weight);
 
   const metrics = computeMetrics(holdoutActual, holdoutPredicted, holdoutPrev);
   const svRatio = (fullModel.supportIndices.length / Math.max(1, fullX.length)) * 100;
-  const endForecast = forecast[forecast.length - 1]?.point ?? prices[n - 1];
-  const chgPct = ((endForecast - prices[n - 1]) / prices[n - 1]) * 100;
+  const endForecast = forecast[forecast.length - 1]?.point ?? prices[n - 1] ?? 100;
+  const lastObsPrice = prices[n - 1] ?? 100;
+  const chgPct = ((endForecast - lastObsPrice) / lastObsPrice) * 100;
 
   return {
     id: 'svr',
