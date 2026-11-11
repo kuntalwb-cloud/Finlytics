@@ -203,14 +203,18 @@ export function runRnnGaModel(
   const trainNorm = normRets.slice(0, trainEnd - 1);
 
   const rng = createRng(1337 + n);
-  const hiddenUnits = 6;
-  const inputWindow = frequency === 'monthly' ? 5 : 8;
-  const popSize = 18;
-  const generations = 16;
+  const hiddenUnits = 5;
+  const inputWindow = frequency === 'monthly' ? 4 : 6;
+  const popSize = 12;
+  const generations = 8;
   const crossoverRate = 0.75;
   const mutationRate = 0.22;
 
-  const { seqs: allTrainSeqs, targets: allTrainTargets } = buildReturnSequences(trainNorm, inputWindow);
+  // Window training sequences to the most recent 160 observations for rapid & relevant convergence
+  const trainSampleLimit = Math.min(160, trainNorm.length);
+  const recentTrainNorm = trainNorm.slice(trainNorm.length - trainSampleLimit);
+
+  const { seqs: allTrainSeqs, targets: allTrainTargets } = buildReturnSequences(recentTrainNorm, inputWindow);
   const valSplit = Math.max(4, Math.floor(allTrainSeqs.length * 0.22));
   const subSeqs = allTrainSeqs.slice(0, Math.max(4, allTrainSeqs.length - valSplit));
   const subTargets = allTrainTargets.slice(0, Math.max(4, allTrainTargets.length - valSplit));
@@ -218,10 +222,9 @@ export function runRnnGaModel(
   const valTargets = allTrainTargets.slice(Math.max(4, allTrainTargets.length - valSplit));
 
   let population: Chromosome[] = Array.from({ length: popSize }, () => {
-    const lr = 0.008 + rng() * 0.025;
-    const decay = 0.0005 + rng() * 0.003;
+    const lr = 0.008 + rng() * 0.02;
+    const decay = 0.0005 + rng() * 0.002;
     const weights = initElmanWeights(hiddenUnits, rng);
-    fineTuneBptt(weights, subSeqs, subTargets, lr, decay, 5);
     const fitnessMse = evaluateSequences(weights, valSeqs, valTargets);
     return { hiddenUnits, inputWindow, learningRate: lr, decay, weights, fitnessMse };
   });
@@ -251,11 +254,10 @@ export function runRnnGaModel(
       const p2 = selectTournament();
       const childWeights =
         rng() < crossoverRate ? crossoverWeights(p1.weights, p2.weights, rng) : cloneWeights(p1.weights);
-      mutateWeights(childWeights, mutationRate, 0.14, rng);
-      const lr = Math.max(0.004, Math.min(0.04, (p1.learningRate + p2.learningRate) / 2 + (rng() * 2 - 1) * 0.004));
-      const decay = Math.max(0.0002, Math.min(0.005, (p1.decay + p2.decay) / 2));
+      mutateWeights(childWeights, mutationRate, 0.12, rng);
+      const lr = Math.max(0.004, Math.min(0.03, (p1.learningRate + p2.learningRate) / 2 + (rng() * 2 - 1) * 0.003));
+      const decay = Math.max(0.0002, Math.min(0.004, (p1.decay + p2.decay) / 2));
 
-      fineTuneBptt(childWeights, subSeqs, subTargets, lr, decay, 4);
       const fitnessMse = evaluateSequences(childWeights, valSeqs, valTargets);
       nextPop.push({ hiddenUnits, inputWindow, learningRate: lr, decay, weights: childWeights, fitnessMse });
     }
@@ -265,9 +267,9 @@ export function runRnnGaModel(
   population.sort((a, b) => a.fitnessMse - b.fitnessMse);
   const bestChrom = population[0];
 
-  // Fine-tune best GA-evolved RNN on full training window for holdout evaluation
+  // Fine-tune best GA-evolved RNN on recent training window for holdout evaluation
   const trainRnnWeights = cloneWeights(bestChrom.weights);
-  fineTuneBptt(trainRnnWeights, allTrainSeqs, allTrainTargets, bestChrom.learningRate, bestChrom.decay, 14);
+  fineTuneBptt(trainRnnWeights, allTrainSeqs, allTrainTargets, bestChrom.learningRate, bestChrom.decay, 6);
 
   const holdoutActual: number[] = [];
   const holdoutPredicted: number[] = [];
@@ -292,7 +294,7 @@ export function runRnnGaModel(
   const { seqs: fullSeqs, targets: fullTargets } = buildReturnSequences(fullNormRets, inputWindow);
 
   const fullWeights = cloneWeights(bestChrom.weights);
-  fineTuneBptt(fullWeights, fullSeqs, fullTargets, bestChrom.learningRate, bestChrom.decay, 18);
+  fineTuneBptt(fullWeights, fullSeqs, fullTargets, bestChrom.learningRate, bestChrom.decay, 5);
 
   const fitted = [...prices];
   const residuals = new Array(n).fill(0);

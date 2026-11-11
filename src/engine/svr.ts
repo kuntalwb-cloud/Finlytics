@@ -179,39 +179,18 @@ export function runSvrModel(
   const yStd = Math.max(1e-5, stdDev(trainYRaw, false));
 
   const scaleX = (row: number[]) => row.map((v, j) => (v - featMeans[j]) / featStds[j]);
-  const trainX = trainXRaw.map(scaleX);
-  const trainY = trainYRaw.map((v) => (v - yMean) / yStd);
+  const allTrainX = trainXRaw.map(scaleX);
+  const allTrainY = trainYRaw.map((v) => (v - yMean) / yStd);
 
-  // Quick validation split on tail of training data to pick (C, gamma)
-  const valSplit = Math.max(5, Math.floor(trainX.length * 0.2));
-  const subTrainX = trainX.slice(0, trainX.length - valSplit);
-  const subTrainY = trainY.slice(0, trainY.length - valSplit);
-  const valX = trainX.slice(trainX.length - valSplit);
-  const valY = trainY.slice(trainY.length - valSplit);
+  // Window to recent 160 samples for maximum speed & contemporary regime relevance
+  const sampleLimit = Math.min(160, allTrainX.length);
+  const trainX = allTrainX.slice(allTrainX.length - sampleLimit);
+  const trainY = allTrainY.slice(allTrainY.length - sampleLimit);
 
-  let bestParams = { c: 2.0, eps: 0.1, gamma: 1 / numFeat };
-  let bestValMse = Infinity;
-  const cGrid = [1.0, 2.5, 5.0];
-  const gGrid = [0.5 / numFeat, 1.0 / numFeat, 2.0 / numFeat];
+  const bestParams = { c: 2.0, eps: 0.1, gamma: 1 / numFeat };
 
-  for (const c of cGrid) {
-    for (const g of gGrid) {
-      const m = trainSvrDual(subTrainX, subTrainY, c, 0.1, g, 80);
-      let mse = 0;
-      for (let i = 0; i < valX.length; i++) {
-        const pred = predictSvr(m, valX[i]);
-        mse += Math.pow(valY[i] - pred, 2);
-      }
-      mse /= Math.max(1, valX.length);
-      if (mse < bestValMse) {
-        bestValMse = mse;
-        bestParams = { c, eps: 0.1, gamma: g };
-      }
-    }
-  }
-
-  // Fit on training window for holdout evaluation
-  const trainModel = trainSvrDual(trainX, trainY, bestParams.c, bestParams.eps, bestParams.gamma, 130);
+  // Fit on recent training window for holdout evaluation
+  const trainModel = trainSvrDual(trainX, trainY, bestParams.c, bestParams.eps, bestParams.gamma, 35);
   const holdoutActual: number[] = [];
   const holdoutPredicted: number[] = [];
   const holdoutPrev: number[] = [];
@@ -226,7 +205,7 @@ export function runSvrModel(
     holdoutPrev.push(prices[idx - 1]);
   }
 
-  // Refit on FULL dataset for final fitted curve & horizon forecast
+  // Refit on recent window of FULL dataset for final fitted curve & horizon forecast
   const { XRaw: fullXRaw, yRaw: fullYRaw, indices: fullIndices } = buildSamples(n);
   const fullFeatMeans = new Array(numFeat).fill(0);
   const fullFeatStds = new Array(numFeat).fill(1);
@@ -239,9 +218,12 @@ export function runSvrModel(
   const fullYStd = Math.max(1e-5, stdDev(fullYRaw, false));
   const scaleFullX = (row: number[]) => row.map((v, j) => (v - fullFeatMeans[j]) / fullFeatStds[j]);
 
-  const fullX = fullXRaw.map(scaleFullX);
-  const fullY = fullYRaw.map((v) => (v - fullYMean) / fullYStd);
-  const fullModel = trainSvrDual(fullX, fullY, bestParams.c, bestParams.eps, bestParams.gamma, 150);
+  const allFullX = fullXRaw.map(scaleFullX);
+  const allFullY = fullYRaw.map((v) => (v - fullYMean) / fullYStd);
+  const fullSampleLimit = Math.min(160, allFullX.length);
+  const fullX = allFullX.slice(allFullX.length - fullSampleLimit);
+  const fullY = allFullY.slice(allFullY.length - fullSampleLimit);
+  const fullModel = trainSvrDual(fullX, fullY, bestParams.c, bestParams.eps, bestParams.gamma, 35);
 
   const fitted = [...prices];
   const residuals = new Array(n).fill(0);

@@ -18,7 +18,7 @@ interface HmmParams {
   states: number[];
 }
 
-function fitGaussianHmm(rets: number[], K = 3, maxIter = 45): HmmParams {
+function fitGaussianHmm(rets: number[], K = 3, maxIter = 18): HmmParams {
   const T = rets.length;
   const rMean = mean(rets);
   const rStd = Math.max(1e-4, stdDev(rets, false));

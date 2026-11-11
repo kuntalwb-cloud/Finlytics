@@ -1,12 +1,11 @@
 import React from 'react';
-import { Upload } from 'lucide-react';
 
 export type WorkspaceTab = 'overview' | 'models' | 'volatility' | 'summary' | 'data';
 
 interface TopBarProps {
   activeTab: WorkspaceTab;
   onTabChange: (tab: WorkspaceTab) => void;
-  onUploadClick: () => void;
+  onUploadClick?: () => void;
   hasData?: boolean;
 }
 
@@ -55,17 +54,6 @@ export const TopBar: React.FC<TopBarProps> = ({ activeTab, onTabChange, onUpload
             })}
           </nav>
         )}
-
-        <div className="shrink-0">
-          <button
-            type="button"
-            onClick={onUploadClick}
-            className="inline-flex items-center gap-2 px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors duration-150 whitespace-nowrap shrink-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
-          >
-            <Upload className="w-3.5 h-3.5" aria-hidden="true" />
-            Upload Excel / CSV
-          </button>
-        </div>
       </div>
     </header>
   );

@@ -49,8 +49,8 @@ function fitArmaCss(w: number[], p: number, q: number): ArmaFit {
     };
   }
 
-  // Hannan-Rissanen Stage 1: fit high-order AR to obtain innovation estimates
-  const highArOrder = Math.min(Math.max(p + q + 2, 4), Math.floor(n / 4));
+  // Hannan-Rissanen Stage 1: fit high-order AR to obtain innovation estimates (order 4-8 is canonical)
+  const highArOrder = Math.min(8, Math.max(p + q + 2, 4));
   const X1: number[][] = [];
   const y1: number[] = [];
   for (let t = highArOrder; t < n; t++) {
@@ -190,22 +190,23 @@ export function runArimaModel(
     }
   }
 
-  // Rolling 1-step holdout predictions using best order
+  // 1-step holdout predictions using trained bestFit coefficients
   const holdoutActual: number[] = [];
   const holdoutPredicted: number[] = [];
   const holdoutPrev: number[] = [];
+  const wAll = differenceSeries(prices, d);
+  const runningEps = [...bestFit.residuals];
 
   for (let idx = trainEnd; idx < n; idx++) {
-    const subPrices = prices.slice(0, idx);
-    const subW = differenceSeries(subPrices, d);
-    const subFit = fitArmaCss(subW, bestFit.p, bestFit.q);
-    // 1-step diff forecast
-    let nextW = subFit.intercept;
-    for (let i = 1; i <= subFit.p; i++) {
-      nextW += subFit.ar[i - 1] * subW[subW.length - i];
+    const diffIdx = idx - d; // differenced index corresponding to target prices[idx]
+    let nextW = bestFit.intercept;
+    for (let i = 1; i <= bestFit.p; i++) {
+      const pastW = diffIdx - i >= 0 ? wAll[diffIdx - i] : bestFit.intercept;
+      nextW += bestFit.ar[i - 1] * pastW;
     }
-    for (let j = 1; j <= subFit.q; j++) {
-      nextW += subFit.ma[j - 1] * subFit.residuals[subFit.residuals.length - j];
+    for (let j = 1; j <= bestFit.q; j++) {
+      const pastEps = runningEps.length - j >= 0 ? runningEps[runningEps.length - j] : 0;
+      nextW += bestFit.ma[j - 1] * pastEps;
     }
 
     let predLevel = prices[idx - 1];
@@ -216,6 +217,10 @@ export function runArimaModel(
     holdoutActual.push(prices[idx]);
     holdoutPredicted.push(Math.max(1e-4, predLevel));
     holdoutPrev.push(prices[idx - 1]);
+
+    // Update innovation
+    const actualW = diffIdx < wAll.length ? wAll[diffIdx] : nextW;
+    runningEps.push(actualW - nextW);
   }
 
   // Refit on FULL dataset for final diagnostics & future horizon forecast
