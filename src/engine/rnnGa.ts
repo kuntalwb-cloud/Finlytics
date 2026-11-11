@@ -189,22 +189,22 @@ export function runRnnGaModel(
   const t0 = performance.now();
   const prices = series.map((s) => s.close);
   const n = prices.length;
-  const trainEnd = Math.max(20, n - holdoutSize);
+  const inputWindow = frequency === 'monthly' ? Math.min(3, Math.max(1, Math.floor(n / 4))) : Math.min(5, Math.max(1, Math.floor(n / 4)));
+  const trainEnd = Math.max(inputWindow + 2, Math.min(n - 2, n - holdoutSize));
 
   const rets: number[] = [];
   for (let i = 1; i < n; i++) {
     rets.push(Math.log(Math.max(1e-6, prices[i]) / Math.max(1e-6, prices[i - 1])));
   }
 
-  const trainRetsRaw = rets.slice(0, trainEnd - 1);
+  const trainRetsRaw = rets.slice(0, Math.max(1, trainEnd - 1));
   const rMean = mean(trainRetsRaw);
   const rStd = Math.max(1e-5, stdDev(trainRetsRaw, false));
   const normRets = rets.map((r) => (r - rMean) / rStd);
-  const trainNorm = normRets.slice(0, trainEnd - 1);
+  const trainNorm = normRets.slice(0, Math.max(1, trainEnd - 1));
 
   const rng = createRng(1337 + n);
   const hiddenUnits = 5;
-  const inputWindow = frequency === 'monthly' ? 4 : 6;
   const popSize = 12;
   const generations = 8;
   const crossoverRate = 0.75;
@@ -215,11 +215,11 @@ export function runRnnGaModel(
   const recentTrainNorm = trainNorm.slice(trainNorm.length - trainSampleLimit);
 
   const { seqs: allTrainSeqs, targets: allTrainTargets } = buildReturnSequences(recentTrainNorm, inputWindow);
-  const valSplit = Math.max(4, Math.floor(allTrainSeqs.length * 0.22));
-  const subSeqs = allTrainSeqs.slice(0, Math.max(4, allTrainSeqs.length - valSplit));
-  const subTargets = allTrainTargets.slice(0, Math.max(4, allTrainTargets.length - valSplit));
-  const valSeqs = allTrainSeqs.slice(Math.max(4, allTrainSeqs.length - valSplit));
-  const valTargets = allTrainTargets.slice(Math.max(4, allTrainTargets.length - valSplit));
+  const valSplit = Math.max(1, Math.floor(allTrainSeqs.length * 0.22));
+  const subSeqs = allTrainSeqs.length > 4 ? allTrainSeqs.slice(0, allTrainSeqs.length - valSplit) : allTrainSeqs;
+  const subTargets = allTrainSeqs.length > 4 ? allTrainTargets.slice(0, allTrainTargets.length - valSplit) : allTrainTargets;
+  const valSeqs = allTrainSeqs.length > 4 ? allTrainSeqs.slice(allTrainSeqs.length - valSplit) : allTrainSeqs;
+  const valTargets = allTrainSeqs.length > 4 ? allTrainTargets.slice(allTrainTargets.length - valSplit) : allTrainTargets;
 
   let population: Chromosome[] = Array.from({ length: popSize }, () => {
     const lr = 0.008 + rng() * 0.02;

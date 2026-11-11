@@ -25,7 +25,7 @@ export function runFullAnalysisPipeline(
   // Daily stock price -> 10 days ahead; Monthly data -> 3 months close ahead
   const horizonSteps = frequency === 'monthly' ? 3 : 10;
   const n = series.length;
-  const holdoutSize = Math.max(5, Math.min(Math.floor(n * 0.25), Math.round(n * holdoutRatio)));
+  const holdoutSize = Math.max(2, Math.min(Math.floor(n * 0.25), Math.max(2, Math.round(n * holdoutRatio))));
 
   const stats = computeDescriptiveStats(series, frequency);
   const arima = runArimaModel(series, frequency, horizonSteps, holdoutSize);

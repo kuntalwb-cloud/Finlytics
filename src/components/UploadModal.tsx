@@ -84,17 +84,21 @@ export const UploadModal: React.FC<UploadModalProps> = ({ isOpen, onClose, onDat
             onChange={handleFileChange}
             className="hidden"
           />
-          <FileSpreadsheet className="w-9 h-9 text-slate-500 mx-auto mb-3" aria-hidden="true" />
+          {isLoading ? (
+            <div className="w-9 h-9 border-3 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto mb-3" />
+          ) : (
+            <FileSpreadsheet className="w-9 h-9 text-slate-500 mx-auto mb-3" aria-hidden="true" />
+          )}
           <div className="text-sm font-semibold text-slate-900">
             {isLoading ? 'Parsing workbook & calibrating models...' : 'Drop Excel (.xlsx, .xls) or CSV file here'}
           </div>
           <p className="mt-1 text-xs text-slate-500">
-            Or click to browse local spreadsheets. Minimum 25 chronological observations required.
+            Or click to browse local spreadsheets. Minimum 8 chronological observations required.
           </p>
           <div className="mt-4">
             <span className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-blue-700 rounded-lg">
               <Upload className="w-3.5 h-3.5" aria-hidden="true" />
-              Select File
+              {isLoading ? 'Processing...' : 'Select File'}
             </span>
           </div>
         </div>

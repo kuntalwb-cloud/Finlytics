@@ -11,15 +11,15 @@ function excelSerialToIso(serial: number): string {
 }
 
 export function normalizeDateString(raw: unknown): { iso: string; timestamp: number; isMonthlyFormat: boolean } {
-  if (typeof raw === 'number' && raw > 15000 && raw < 80000) {
+  if (typeof raw === 'number' && raw > 10000 && raw < 90000) {
     const iso = excelSerialToIso(raw);
     return { iso, timestamp: Date.parse(iso), isMonthlyFormat: false };
   }
   const str = String(raw ?? '').trim();
   if (!str) return { iso: '', timestamp: NaN, isMonthlyFormat: false };
 
-  // Handle YYYY-MM or YYYY/MM
-  const ymMatch = str.match(/^(\d{4})[-/](\d{1,2})$/);
+  // Handle YYYY-MM or YYYY/MM or YYYY.MM
+  const ymMatch = str.match(/^(\d{4})[-/.](?:m|month)?\s*(\d{1,2})$/i);
   if (ymMatch) {
     const y = ymMatch[1];
     const m = ymMatch[2].padStart(2, '0');
@@ -27,13 +27,47 @@ export function normalizeDateString(raw: unknown): { iso: string; timestamp: num
     return { iso: `${y}-${m}`, timestamp: Date.parse(iso), isMonthlyFormat: true };
   }
 
-  // Handle DD/MM/YYYY or MM/DD/YYYY
-  const dmyMatch = str.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
+  // Handle YYYYM01 or YYYY01
+  const ymMatch2 = str.match(/^(\d{4})[Mm](\d{1,2})$/);
+  if (ymMatch2) {
+    const y = ymMatch2[1];
+    const m = ymMatch2[2].padStart(2, '0');
+    const iso = `${y}-${m}-01`;
+    return { iso: `${y}-${m}`, timestamp: Date.parse(iso), isMonthlyFormat: true };
+  }
+
+  // Handle MMM-YY or MMM-YYYY or MMM YYYY (e.g. Jan-24, Jan-2024, Jan 2024, January 2024)
+  const mmmYMatch = str.match(/^([A-Za-z]{3,9})[-/.\s]+(\d{2,4})$/);
+  if (mmmYMatch) {
+    const mStr = mmmYMatch[1];
+    let yStr = mmmYMatch[2];
+    if (yStr.length === 2) yStr = (parseInt(yStr, 10) > 50 ? '19' : '20') + yStr;
+    const testDate = Date.parse(`${mStr} 1, ${yStr}`);
+    if (!Number.isNaN(testDate)) {
+      const d = new Date(testDate);
+      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const iso = `${yStr}-${m}`;
+      return { iso, timestamp: testDate, isMonthlyFormat: true };
+    }
+  }
+
+  // Handle DD/MM/YYYY, DD-MM-YYYY, or DD-MMM-YYYY
+  const dmyMatch = str.match(/^(\d{1,2})[-/.]([A-Za-z]{3,9}|\d{1,2})[-/.](\d{2,4})$/);
   if (dmyMatch) {
-    const a = parseInt(dmyMatch[1], 10);
-    const b = parseInt(dmyMatch[2], 10);
-    const y = dmyMatch[3];
-    // If first part > 12, definitely DD/MM/YYYY; otherwise assume MM/DD/YYYY
+    const p1 = dmyMatch[1];
+    const p2 = dmyMatch[2];
+    let y = dmyMatch[3];
+    if (y.length === 2) y = (parseInt(y, 10) > 50 ? '19' : '20') + y;
+
+    if (/[A-Za-z]/.test(p2)) {
+      const parsed = Date.parse(`${p1} ${p2} ${y}`);
+      if (!Number.isNaN(parsed)) {
+        const d = new Date(parsed);
+        return { iso: d.toISOString().slice(0, 10), timestamp: parsed, isMonthlyFormat: false };
+      }
+    }
+    const a = parseInt(p1, 10);
+    const b = parseInt(p2, 10);
     const month = a > 12 ? b : a;
     const day = a > 12 ? a : b;
     const iso = `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
@@ -50,12 +84,51 @@ export function normalizeDateString(raw: unknown): { iso: string; timestamp: num
   return { iso: str, timestamp: NaN, isMonthlyFormat: false };
 }
 
-function parseNumeric(val: unknown): number {
+export function parseNumeric(val: unknown): number {
   if (typeof val === 'number') return Number.isFinite(val) ? val : NaN;
   if (val === null || val === undefined) return NaN;
-  const cleaned = String(val).replace(/[$,%\s,]/g, '');
-  if (!cleaned) return NaN;
-  const num = Number(cleaned);
+  let str = String(val).trim();
+  if (!str) return NaN;
+
+  // Handle accounting parentheses negative: (123.45) -> -123.45
+  let isNegative = false;
+  if (str.startsWith('(') && str.endsWith(')')) {
+    isNegative = true;
+    str = str.slice(1, -1).trim();
+  } else if (str.startsWith('-')) {
+    isNegative = true;
+    str = str.slice(1).trim();
+  }
+
+  // Remove international currency prefixes: ₹, Rs, Rs., INR, $, €, £, ¥, ₩, CHF, CAD, AUD, USD, EUR, GBP
+  str = str.replace(/^(₹|rs\.?|inr|\$|€|£|¥|₩|c\$|a\$|usd|eur|gbp)\s*/i, '');
+  // Remove trailing currency or accounting slash-dash: /-, ₹, etc.
+  str = str.replace(/\s*(₹|rs\.?|inr|\$|€|£|¥|₩|\/-)$/i, '');
+  // Remove whitespace and percentage signs
+  str = str.replace(/[% \t]/g, '');
+
+  if (str.includes(',') && !str.includes('.')) {
+    // Only comma present: European decimal e.g. "123,45"
+    const parts = str.split(',');
+    if (parts.length === 2 && parts[1].length <= 3) {
+      str = `${parts[0]}.${parts[1]}`;
+    } else {
+      str = str.replace(/,/g, '');
+    }
+  } else if (str.includes(',') && str.includes('.')) {
+    const lastComma = str.lastIndexOf(',');
+    const lastDot = str.lastIndexOf('.');
+    if (lastComma > lastDot) {
+      // European 1.234,56
+      str = str.replace(/\./g, '').replace(',', '.');
+    } else {
+      // US/UK 1,234.56
+      str = str.replace(/,/g, '');
+    }
+  }
+
+  let num = parseFloat(str);
+  if (isNegative) num = -num;
   return Number.isFinite(num) ? num : NaN;
 }
 
@@ -65,8 +138,10 @@ export function detectColumns(headers: string[], rows: Record<string, string | n
 } {
   const lowerHeaders = headers.map((h) => h.toLowerCase().trim());
 
-  const datePriority = ['date', 'timestamp', 'time', 'period', 'month', 'day', 'dt', 'observation_date'];
-  let dateCol = headers[0] || '';
+  const datePriority = [
+    'date', 'timestamp', 'time', 'trade_date', 'tradedate', 'bhav_date', 'period', 'month', 'year', 'dt', 'day', 'observation_date'
+  ];
+  let dateCol = headers[0] || 'Date';
   for (const kw of datePriority) {
     const idx = lowerHeaders.findIndex((h) => h === kw || h.includes(kw));
     if (idx !== -1) {
@@ -75,7 +150,9 @@ export function detectColumns(headers: string[], rows: Record<string, string | n
     }
   }
 
-  const pricePriority = ['adj close', 'adj_close', 'close', 'price', 'last', 'value', 'index', 'nav', 'rate', 'settle'];
+  const pricePriority = [
+    'adj close', 'adj_close', 'close', 'closing', 'last', 'ltp', 'last traded price', 'settle', 'settlement', 'price', 'nav', 'bhav', 'value', 'index', 'rate'
+  ];
   let priceCol = headers.find((h) => h !== dateCol) || headers[0] || '';
   for (const kw of pricePriority) {
     const idx = lowerHeaders.findIndex((h) => h === kw || h.includes(kw));
@@ -85,15 +162,23 @@ export function detectColumns(headers: string[], rows: Record<string, string | n
     }
   }
 
-  // Verify priceCol actually has numbers
-  const sampleCheck = rows.slice(0, 15).filter((r) => !Number.isNaN(parseNumeric(r[priceCol]))).length;
+  // Verify priceCol actually contains valid positive numbers; if not, find the column with the most valid numbers
+  const sampleCheck = rows.slice(0, 20).filter((r) => {
+    const val = parseNumeric(r[priceCol]);
+    return !Number.isNaN(val) && val > 0;
+  }).length;
+
   if (sampleCheck === 0) {
+    let bestCount = 0;
     for (const h of headers) {
       if (h === dateCol) continue;
-      const numCount = rows.slice(0, 15).filter((r) => !Number.isNaN(parseNumeric(r[h]))).length;
-      if (numCount > 0) {
+      const numCount = rows.slice(0, 20).filter((r) => {
+        const val = parseNumeric(r[h]);
+        return !Number.isNaN(val) && val > 0;
+      }).length;
+      if (numCount > bestCount) {
+        bestCount = numCount;
         priceCol = h;
-        break;
       }
     }
   }
@@ -130,8 +215,9 @@ export function buildSeriesFromRows(
     const close = parseNumeric(row[priceCol]);
     if (Number.isNaN(close) || close <= 0) continue;
 
-    const rawDate = String(row[dateCol] ?? `T+${i + 1}`);
-    const norm = normalizeDateString(row[dateCol]);
+    const rawVal = row[dateCol];
+    const rawDate = rawVal !== null && rawVal !== undefined && String(rawVal).trim() !== '' ? String(rawVal) : `T+${i + 1}`;
+    const norm = normalizeDateString(rawVal);
 
     extracted.push({
       rawDate,
@@ -179,6 +265,8 @@ export function buildSeriesFromRows(
         detectedFrequency = 'monthly';
       }
     }
+  } else if (deduped.some((d) => d.isMonthlyFormat)) {
+    detectedFrequency = 'monthly';
   }
 
   const series: DataPoint[] = deduped.map((d, idx) => ({
@@ -203,26 +291,129 @@ export async function parseFinancialFile(file: File): Promise<ParsedDataset> {
     throw new Error('The uploaded workbook contains no readable sheets.');
   }
   const sheet = workbook.Sheets[sheetName];
-  const rawJson = XLSX.utils.sheet_to_json<Record<string, string | number | null>>(sheet, {
+
+  // Extract 2D matrix of raw cell values to detect headers flexibly
+  const aoa = XLSX.utils.sheet_to_json<unknown[]>(sheet, {
+    header: 1,
     defval: null,
-    raw: true,
+    blankrows: false,
   });
 
-  if (!rawJson || rawJson.length === 0) {
+  if (!aoa || aoa.length === 0) {
     throw new Error('No tabular rows were found in the uploaded file.');
   }
 
-  const headers = Object.keys(rawJson[0]).filter((h) => !h.startsWith('__EMPTY'));
-  if (headers.length < 2) {
-    throw new Error('Expected at least two columns (Date/Period and Price/Value).');
+  // Determine max column count
+  let maxCols = 0;
+  for (const r of aoa) {
+    if (Array.isArray(r)) {
+      const nonNull = r.filter((c) => c !== null && c !== undefined && String(c).trim() !== '').length;
+      if (nonNull > maxCols) maxCols = nonNull;
+    }
+  }
+
+  // Scan up to the first 20 rows for the true header row, defaulting to row 0
+  let headerRowIdx = 0;
+  let bestScore = -1;
+  const headerKeywords = [
+    'date', 'time', 'dt', 'period', 'month', 'year', 'day', 'observation_date', 'trade_date', 'tradedate', 'bhav_date',
+    'close', 'adj', 'last', 'ltp', 'price', 'settle', 'bhav', 'nav', 'rate', 'value', 'index', 'open', 'high', 'low', 'vol'
+  ];
+
+  for (let r = 0; r < Math.min(20, aoa.length); r++) {
+    const row = aoa[r];
+    if (!Array.isArray(row)) continue;
+    const nonEmptyCells = row.filter((c) => c !== null && c !== undefined && String(c).trim() !== '');
+    if (nonEmptyCells.length === 0) continue;
+
+    if (maxCols > 1 && nonEmptyCells.length < 2) continue;
+
+    const strCells = nonEmptyCells.map((c) => String(c).toLowerCase().trim());
+    let score = 0;
+    for (const cell of strCells) {
+      if (headerKeywords.some((kw) => cell === kw || cell.includes(kw))) {
+        score += 15;
+      } else if (/[a-zA-Z]/.test(cell)) {
+        score += 2;
+      }
+    }
+
+    // Row 0 gets a small bonus so we prefer row 0 unless a later row clearly matches headers much better
+    if (r === 0) score += 5;
+
+    if (score > bestScore) {
+      bestScore = score;
+      headerRowIdx = r;
+    }
+  }
+
+  let rawHeaders: string[] = [];
+  let dataRowsAoa: unknown[][] = [];
+
+  if (headerRowIdx !== -1 && aoa[headerRowIdx]) {
+    const rawHeaderRow = (aoa[headerRowIdx] as unknown[]) || [];
+    rawHeaders = rawHeaderRow.map((c, idx) => {
+      const s = String(c ?? '').trim();
+      return s || `Column_${idx + 1}`;
+    });
+    dataRowsAoa = aoa.slice(headerRowIdx + 1);
+  } else {
+    // Pure numeric dataset without explicit header row
+    const firstRow = (aoa[0] as unknown[]) || [];
+    if (firstRow.length <= 1) {
+      rawHeaders = ['Date', 'Close'];
+      dataRowsAoa = aoa.map((row, idx) => {
+        const rArr = (row as unknown[]) || [];
+        return [`T+${idx + 1}`, rArr[0] ?? null];
+      });
+    } else {
+      rawHeaders = firstRow.map((_, idx) => (idx === 0 ? 'Date' : `Series_${idx}`));
+      dataRowsAoa = aoa;
+    }
+  }
+
+  // Handle single-column spreadsheet with a header
+  if (rawHeaders.length === 1) {
+    const singleHeader = rawHeaders[0];
+    rawHeaders = ['Date', singleHeader];
+    dataRowsAoa = dataRowsAoa.map((row, idx) => {
+      const rArr = (row as unknown[]) || [];
+      return [`T+${idx + 1}`, rArr[0] ?? null];
+    });
+  }
+
+  // Deduplicate headers
+  const headers: string[] = [];
+  const headerCount = new Map<string, number>();
+  for (const h of rawHeaders) {
+    const count = headerCount.get(h) ?? 0;
+    headerCount.set(h, count + 1);
+    headers.push(count === 0 ? h : `${h}_${count + 1}`);
+  }
+
+  // Convert AOA rows into Record objects
+  const rawJson: Record<string, string | number | null>[] = [];
+  for (const row of dataRowsAoa) {
+    if (!Array.isArray(row) || row.every((c) => c === null || c === undefined || String(c).trim() === '')) {
+      continue;
+    }
+    const obj: Record<string, string | number | null> = {};
+    for (let c = 0; c < headers.length; c++) {
+      obj[headers[c]] = (row[c] as string | number | null) ?? null;
+    }
+    rawJson.push(obj);
+  }
+
+  if (rawJson.length === 0) {
+    throw new Error('No valid data rows found in the uploaded file.');
   }
 
   const { dateCol, priceCol } = detectColumns(headers, rawJson);
   const { series, detectedFrequency } = buildSeriesFromRows(headers, rawJson, dateCol, priceCol);
 
-  if (series.length < 25) {
+  if (series.length < 8) {
     throw new Error(
-      `Only ${series.length} valid observations found. At least 25 time-series observations are required for ARIMA, GARCH, HMM, and ML estimation.`
+      `Only ${series.length} valid positive price observations found in column "${priceCol}". At least 8 chronological observations are required for econometric modeling.`
     );
   }
 

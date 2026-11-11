@@ -185,8 +185,8 @@ export function runHmmModel(
   const prices = series.map((s) => s.close);
   const n = prices.length;
   const rets = logReturns(prices);
-  const trainEnd = Math.max(20, n - holdoutSize);
-  const trainRets = rets.slice(0, trainEnd - 1);
+  const trainEnd = Math.max(4, Math.min(n - 2, n - holdoutSize));
+  const trainRets = rets.slice(0, Math.max(1, trainEnd - 1));
 
   const trainHmm = fitGaussianHmm(trainRets, 3, 40);
 
@@ -195,7 +195,9 @@ export function runHmmModel(
   const holdoutPredicted: number[] = [];
   const holdoutPrev: number[] = [];
 
-  let belief = [...trainHmm.gamma[trainHmm.gamma.length - 1]];
+  let belief = trainHmm.gamma[trainHmm.gamma.length - 1]
+    ? [...trainHmm.gamma[trainHmm.gamma.length - 1]]
+    : [1 / 3, 1 / 3, 1 / 3];
   for (let idx = trainEnd; idx < n; idx++) {
     // Propagate belief one step: p_next = belief * A
     const nextBelief = [0, 0, 0];

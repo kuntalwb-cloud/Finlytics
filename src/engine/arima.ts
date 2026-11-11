@@ -49,8 +49,8 @@ function fitArmaCss(w: number[], p: number, q: number): ArmaFit {
     };
   }
 
-  // Hannan-Rissanen Stage 1: fit high-order AR to obtain innovation estimates (order 4-8 is canonical)
-  const highArOrder = Math.min(8, Math.max(p + q + 2, 4));
+  // Hannan-Rissanen Stage 1: fit high-order AR to obtain innovation estimates
+  const highArOrder = Math.max(1, Math.min(Math.floor((n - 2) / 2), Math.min(8, Math.max(p + q + 2, 2))));
   const X1: number[][] = [];
   const y1: number[] = [];
   for (let t = highArOrder; t < n; t++) {
@@ -152,7 +152,7 @@ export function runArimaModel(
   const t0 = performance.now();
   const prices = series.map((s) => s.close);
   const n = prices.length;
-  const trainEnd = Math.max(20, n - holdoutSize);
+  const trainEnd = Math.max(4, Math.min(n - 2, n - holdoutSize));
   const trainPrices = prices.slice(0, trainEnd);
 
   // Determine differencing order d via ADF test

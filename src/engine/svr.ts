@@ -147,8 +147,8 @@ export function runSvrModel(
   const t0 = performance.now();
   const prices = series.map((s) => s.close);
   const n = prices.length;
-  const lookback = frequency === 'monthly' ? 4 : 5;
-  const trainEnd = Math.max(lookback + 15, n - holdoutSize);
+  const lookback = frequency === 'monthly' ? Math.min(3, Math.max(1, Math.floor(n / 4))) : Math.min(5, Math.max(1, Math.floor(n / 4)));
+  const trainEnd = Math.max(lookback + 2, Math.min(n - 2, n - holdoutSize));
 
   const buildSamples = (endIdx: number) => {
     const XRaw: number[][] = [];
@@ -167,16 +167,19 @@ export function runSvrModel(
   const { XRaw: trainXRaw, yRaw: trainYRaw } = buildSamples(trainEnd);
 
   // Standardize features & target based on training statistics
-  const numFeat = trainXRaw[0].length;
+  const sampleFeat = buildFeatureVector(prices.slice(0, Math.min(prices.length, lookback + 2)), lookback);
+  const numFeat = trainXRaw[0]?.length ?? sampleFeat.length;
   const featMeans = new Array(numFeat).fill(0);
   const featStds = new Array(numFeat).fill(1);
-  for (let j = 0; j < numFeat; j++) {
-    const col = trainXRaw.map((r) => r[j]);
-    featMeans[j] = mean(col);
-    featStds[j] = Math.max(1e-5, stdDev(col, false));
+  if (trainXRaw.length > 0) {
+    for (let j = 0; j < numFeat; j++) {
+      const col = trainXRaw.map((r) => r[j]);
+      featMeans[j] = mean(col);
+      featStds[j] = Math.max(1e-5, stdDev(col, false));
+    }
   }
-  const yMean = mean(trainYRaw);
-  const yStd = Math.max(1e-5, stdDev(trainYRaw, false));
+  const yMean = trainYRaw.length > 0 ? mean(trainYRaw) : 0;
+  const yStd = trainYRaw.length > 0 ? Math.max(1e-5, stdDev(trainYRaw, false)) : 0.02;
 
   const scaleX = (row: number[]) => row.map((v, j) => (v - featMeans[j]) / featStds[j]);
   const allTrainX = trainXRaw.map(scaleX);

@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from 'react';
-import { Upload, ArrowUpRight, TrendingUp, Cpu, FileSpreadsheet } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Upload, ArrowUpRight, TrendingUp, Cpu, FileSpreadsheet, AlertCircle } from 'lucide-react';
 import { DataExplorerView } from './components/DataExplorerView';
 import { ModelDetailView } from './components/ModelDetailView';
 import { OverviewComparison } from './components/OverviewComparison';
@@ -11,7 +11,7 @@ import { VolatilityLabView } from './components/VolatilityLabView';
 import { WelcomeScreen } from './components/WelcomeScreen';
 import { runFullAnalysisPipeline } from './engine/pipeline';
 import { FullAnalysisResult, ModelId, ParsedDataset, SeriesFrequency } from './types/timeseries';
-import { buildSeriesFromRows } from './utils/dataParser';
+import { buildSeriesFromRows, parseFinancialFile } from './utils/dataParser';
 
 export default function App() {
   // Show welcome screen initially until user clicks "Enter Workspace"
@@ -30,6 +30,8 @@ export default function App() {
   const [isUploadOpen, setIsUploadOpen] = useState<boolean>(false);
   const [isComputing, setIsComputing] = useState<boolean>(false);
   const [pipelineError, setPipelineError] = useState<string | null>(null);
+  const [isLandingDrag, setIsLandingDrag] = useState<boolean>(false);
+  const directFileInputRef = useRef<HTMLInputElement>(null);
 
   const executePipeline = useCallback(
     (
@@ -44,9 +46,9 @@ export default function App() {
       window.setTimeout(() => {
         try {
           const { series } = buildSeriesFromRows(ds.headers, ds.rows, dCol, pCol);
-          if (series.length < 25) {
+          if (series.length < 8) {
             throw new Error(
-              `Column "${pCol}" yielded only ${series.length} valid positive numeric rows. At least 25 chronological records are required for econometric and ML estimation.`
+              `Column "${pCol}" yielded only ${series.length} valid positive numeric rows. At least 8 chronological records are required for econometric and ML estimation.`
             );
           }
           const updatedDs: ParsedDataset = { ...ds, series };
@@ -62,6 +64,23 @@ export default function App() {
     },
     []
   );
+
+  const handleProcessRawFile = async (file: File) => {
+    setIsComputing(true);
+    setPipelineError(null);
+    try {
+      const parsed = await parseFinancialFile(file);
+      setDateCol(parsed.detectedDateCol);
+      setPriceCol(parsed.detectedPriceCol);
+      setFrequency(parsed.detectedFrequency);
+      setDataset(parsed);
+      executePipeline(parsed, parsed.detectedDateCol, parsed.detectedPriceCol, parsed.detectedFrequency, holdoutRatio);
+      setActiveTab('overview');
+    } catch (err) {
+      setPipelineError(err instanceof Error ? err.message : 'Unable to parse the uploaded file.');
+      setIsComputing(false);
+    }
+  };
 
   const handleDatasetLoaded = (newDs: ParsedDataset) => {
     setDateCol(newDs.detectedDateCol);
@@ -120,33 +139,86 @@ export default function App() {
               <TrendingUp className="w-3.5 h-3.5" />
               Financial Time-Series Econometrics &amp; Machine Learning
             </div>
-            
+
             <h1 className="font-display text-3xl sm:text-4xl lg:text-5xl font-bold tracking-tight text-slate-900">
               Analyze your financial series with multi-model econometrics &amp; ML
             </h1>
-            
+
             <p className="text-base text-slate-600 max-w-2xl mx-auto leading-relaxed">
               Upload your custom Excel (<span className="font-mono text-slate-800">.xlsx</span>, <span className="font-mono text-slate-800">.xls</span>) or CSV file. Finlytics automatically parses your columns, detects series frequency (daily 10-day vs. monthly 3-month forecast), and runs complete ARIMA, SVR, GA-RNN, 3-State HMM, Kalman Filter, and AR(2)-GARCH/EGARCH volatility models.
             </p>
 
-            {/* Upload Call to Action Box */}
-            <div className="pt-4">
-              <button
-                type="button"
-                onClick={() => setIsUploadOpen(true)}
-                className="inline-flex items-center gap-3 px-6 py-3.5 text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-xl transition-all shadow-md hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 cursor-pointer"
-              >
-                <Upload className="w-4 h-4" aria-hidden="true" />
-                Upload Excel or CSV Sheet
-                <ArrowUpRight className="w-4 h-4" aria-hidden="true" />
-              </button>
-              <div className="mt-2 text-xs text-slate-500">
-                Supports daily stock prices, monthly closing prices, macroeconomic series, and custom OHLCV data.
+            {/* Prominent Error Banner if file upload or calculation errored */}
+            {pipelineError && (
+              <div className="p-4 text-xs text-red-800 bg-red-50 border border-red-200 rounded-xl flex items-start justify-between gap-3 text-left shadow-xs">
+                <div className="flex items-start gap-2.5">
+                  <AlertCircle className="w-4 h-4 text-red-600 shrink-0 mt-0.5" />
+                  <div>
+                    <div className="font-semibold text-red-900 mb-0.5">Upload / Analysis Issue Detected</div>
+                    <div>{pipelineError}</div>
+                    <div className="mt-1 text-[11px] text-red-700">
+                      Tip: Ensure your sheet contains at least 8 observations with a date/period and price/close column.
+                    </div>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setPipelineError(null)}
+                  className="px-2.5 py-1 text-[11px] font-semibold text-red-700 bg-red-100 hover:bg-red-200 rounded-md cursor-pointer shrink-0"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* Direct Drag & Drop or Click Upload Box */}
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsLandingDrag(true);
+              }}
+              onDragLeave={() => setIsLandingDrag(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsLandingDrag(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) void handleProcessRawFile(file);
+              }}
+              onClick={() => directFileInputRef.current?.click()}
+              className={`cursor-pointer border-2 border-dashed rounded-2xl p-8 text-center transition-all ${
+                isLandingDrag
+                  ? 'border-blue-600 bg-blue-50/70 shadow-md scale-[1.01]'
+                  : 'border-slate-300 hover:border-blue-500 bg-white hover:bg-slate-50/80 shadow-sm'
+              }`}
+            >
+              <input
+                ref={directFileInputRef}
+                type="file"
+                accept=".csv,.xlsx,.xls"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) void handleProcessRawFile(file);
+                }}
+                className="hidden"
+              />
+              <FileSpreadsheet className="w-10 h-10 text-blue-700 mx-auto mb-3" aria-hidden="true" />
+              <div className="text-base font-semibold text-slate-900">
+                Drop your Excel (.xlsx, .xls) or CSV sheet here
+              </div>
+              <p className="mt-1.5 text-xs text-slate-500 max-w-md mx-auto">
+                Or click to browse files from your computer. Supports daily stock prices, monthly macroeconomic series, and custom OHLCV data (minimum 8 observations).
+              </p>
+              <div className="mt-4">
+                <span className="inline-flex items-center gap-2 px-5 py-2.5 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-xl transition-all shadow-xs">
+                  <Upload className="w-3.5 h-3.5" aria-hidden="true" />
+                  Select Excel / CSV File
+                  <ArrowUpRight className="w-3.5 h-3.5" aria-hidden="true" />
+                </span>
               </div>
             </div>
 
             {/* Methodology Showcase Grid */}
-            <div className="pt-10 grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
+            <div className="pt-8 grid grid-cols-1 sm:grid-cols-3 gap-4 text-left">
               <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
                 <div className="w-8 h-8 rounded-lg bg-blue-50 text-blue-700 flex items-center justify-center mb-3">
                   <TrendingUp className="w-4 h-4" />
@@ -251,6 +323,28 @@ export default function App() {
         onClose={() => setIsUploadOpen(false)}
         onDatasetLoaded={handleDatasetLoaded}
       />
+
+      {/* Active Computing Indicator Overlay */}
+      {isComputing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-xs p-4"
+          role="status"
+          aria-live="polite"
+        >
+          <div className="bg-white border border-slate-200 rounded-2xl p-8 max-w-md w-full shadow-2xl text-center space-y-4">
+            <div className="w-12 h-12 border-4 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+            <h3 className="font-display text-base font-bold text-slate-900">
+              Calibrating Multi-Model Econometrics &amp; ML
+            </h3>
+            <p className="text-xs text-slate-600 leading-relaxed">
+              Running ARIMA, SVR (RBF), GA-RNN, 3-State Gaussian HMM, Local Linear Kalman Filter, and AR(2)-GARCH/EGARCH Volatility Lab...
+            </p>
+            <div className="text-[11px] font-mono text-blue-700 bg-blue-50 py-1.5 px-3 rounded-lg border border-blue-100">
+              High-performance econometrics engine calculating
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

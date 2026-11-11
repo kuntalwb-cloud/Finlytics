@@ -184,7 +184,7 @@ export function runKalmanModel(
   const t0 = performance.now();
   const prices = series.map((s) => s.close);
   const n = prices.length;
-  const trainEnd = Math.max(20, n - holdoutSize);
+  const trainEnd = Math.max(4, Math.min(n - 2, n - holdoutSize));
   const trainPrices = prices.slice(0, trainEnd);
 
   const optTrain = optimizeKalmanParams(trainPrices);
