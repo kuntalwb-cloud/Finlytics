@@ -1,0 +1,6 @@
+{
+  "name": "Finlytics",
+  "description": "Financial time-series econometrics and machine learning workbench featuring ARIMA, SVR, GA-RNN, HMM, Kalman Filter, and AR(2)-GARCH/EGARCH volatility modeling.",
+  "requestFramePermissions": [],
+  "majorCapabilities": []
+}
