@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { FileSpreadsheet, Upload, ArrowUpRight, CheckCircle2, TrendingUp, Cpu } from 'lucide-react';
+import { Upload, ArrowUpRight, TrendingUp, Cpu, FileSpreadsheet } from 'lucide-react';
 import { DataExplorerView } from './components/DataExplorerView';
 import { ModelDetailView } from './components/ModelDetailView';
 import { OverviewComparison } from './components/OverviewComparison';
@@ -8,11 +8,15 @@ import { SummaryReportView } from './components/SummaryReportView';
 import { TopBar, WorkspaceTab } from './components/TopBar';
 import { UploadModal } from './components/UploadModal';
 import { VolatilityLabView } from './components/VolatilityLabView';
+import { WelcomeScreen } from './components/WelcomeScreen';
 import { runFullAnalysisPipeline } from './engine/pipeline';
 import { FullAnalysisResult, ModelId, ParsedDataset, SeriesFrequency } from './types/timeseries';
 import { buildSeriesFromRows } from './utils/dataParser';
 
 export default function App() {
+  // Show welcome screen initially until user clicks "Enter Workspace"
+  const [showWelcome, setShowWelcome] = useState<boolean>(true);
+
   const [dataset, setDataset] = useState<ParsedDataset | null>(null);
   const [dateCol, setDateCol] = useState<string>('');
   const [priceCol, setPriceCol] = useState<string>('');
@@ -94,6 +98,11 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [isUploadOpen]);
 
+  // Dedicated welcome page; transitions to main workbench only on Enter Workspace click
+  if (showWelcome) {
+    return <WelcomeScreen onEnter={() => setShowWelcome(false)} />;
+  }
+
   return (
     <div className="min-h-screen flex flex-col bg-slate-50 text-slate-900">
       <TopBar
@@ -125,7 +134,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => setIsUploadOpen(true)}
-                className="inline-flex items-center gap-3 px-6 py-3.5 text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-xl transition-all shadow-md hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600"
+                className="inline-flex items-center gap-3 px-6 py-3.5 text-sm font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-xl transition-all shadow-md hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-600 cursor-pointer"
               >
                 <Upload className="w-4 h-4" aria-hidden="true" />
                 Upload Excel or CSV Sheet
