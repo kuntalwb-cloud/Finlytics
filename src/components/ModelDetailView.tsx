@@ -1,6 +1,9 @@
 import React from 'react';
+import { Download, FileText, Printer, BookOpen } from 'lucide-react';
 import { BaseModelResult, FullAnalysisResult, ModelId } from '../types/timeseries';
 import { BarDiagnosticChart, MultiSeriesChart } from './InteractiveCharts';
+import { generateModelResearchReport } from '../utils/academicResearchGenerator';
+import { downloadModelReportPdf, downloadModelReportWord } from '../utils/documentExportService';
 
 interface ModelDetailViewProps {
   result: FullAnalysisResult;
@@ -29,6 +32,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
     kalman: result.kalman,
   };
   const m = modelMap[selectedModel];
+  const academicPaper = generateModelResearchReport(selectedModel, result);
 
   const histWindow = Math.min(result.series.length, 80);
   const startIdx = result.series.length - histWindow;
@@ -52,7 +56,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Header & Model Segmented Selector */}
+      {/* Header & Model Segmented Selector + PDF/Word Download Hub */}
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
         <div>
           <h1 className="font-display text-2xl font-bold tracking-tight text-slate-900">{m.name}</h1>
@@ -62,36 +66,49 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
             <span className="font-mono">{m.computationMs.toFixed(1)} ms runtime</span>
             <span aria-hidden="true">·</span>
             <span className="font-mono tabular-nums">Holdout RMSE {m.metrics.rmse.toFixed(4)}</span>
+            <span aria-hidden="true">·</span>
+            <span className="font-semibold text-blue-700">Academic Paper: ~{academicPaper.wordCount} words</span>
           </div>
         </div>
 
-        <div className="flex items-center gap-1 p-1 bg-slate-200/70 rounded-lg overflow-x-auto">
-          {MODEL_TABS.map((tab) => (
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Download Model Report Buttons */}
+          <div className="flex items-center gap-1.5">
             <button
-              key={tab.id}
               type="button"
-              onClick={() => onSelectModel(tab.id)}
-              className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                selectedModel === tab.id
-                  ? 'bg-white text-slate-900 shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={() => downloadModelReportPdf(selectedModel, result)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors cursor-pointer shadow-xs"
             >
-              {tab.label}
+              <Printer className="w-3 h-3" />
+              Download Paper (PDF)
             </button>
-          ))}
-        </div>
-      </div>
+            <button
+              type="button"
+              onClick={() => downloadModelReportWord(selectedModel, result)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-700 hover:bg-indigo-800 rounded-lg transition-colors cursor-pointer shadow-xs"
+            >
+              <FileText className="w-3 h-3" />
+              Download Word (.doc)
+            </button>
+          </div>
 
-      {/* Specification & Interpretation */}
-      <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
-        <div className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-          Mathematical Specification &amp; Analytical Summary
+          <div className="flex items-center gap-1 p-1 bg-slate-200/70 rounded-lg overflow-x-auto">
+            {MODEL_TABS.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => onSelectModel(tab.id)}
+                className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                  selectedModel === tab.id
+                    ? 'bg-white text-slate-900 shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="font-mono text-xs bg-slate-50 border border-slate-200 rounded-lg px-3.5 py-2.5 text-slate-800 overflow-x-auto">
-          {m.equationSummary}
-        </div>
-        <p className="text-sm text-slate-700 leading-relaxed">{m.interpretation}</p>
       </div>
 
       {/* Metrics Strip */}
@@ -104,7 +121,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
           { label: "Theil's U", val: m.metrics.theilU.toFixed(4) },
           { label: 'Out-of-Sample R²', val: m.metrics.rSquared.toFixed(3) },
         ].map((item) => (
-          <div key={item.label} className="bg-white border border-slate-200 rounded-xl p-3.5">
+          <div key={item.label} className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-xs">
             <div className="text-xs text-slate-500">{item.label}</div>
             <div className="mt-1 text-lg font-bold font-mono tabular-nums text-slate-900">{item.val}</div>
           </div>
@@ -112,7 +129,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
       </div>
 
       {/* Fitted vs Actual + Horizon Chart */}
-      <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+      <section className="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-xs">
         <div className="flex items-center justify-between">
           <h2 className="font-display text-base font-semibold text-slate-900">
             In-Sample Fit &amp; {result.horizonSteps}-Step Horizon Projection (95% Prediction Interval)
@@ -141,7 +158,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
       {/* Model-Specific Deep Diagnostics */}
       {selectedModel === 'arima' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-xs">
             <h3 className="font-display text-sm font-semibold text-slate-900">
               ARIMA Parameter Estimates &amp; Residual Tests
             </h3>
@@ -182,7 +199,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
             </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-xs">
             <h3 className="font-display text-sm font-semibold text-slate-900">
               Residual Autocorrelation (ACF) vs 95% White-Noise Bounds
             </h3>
@@ -197,7 +214,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
 
       {selectedModel === 'svr' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-xs">
             <h3 className="font-display text-sm font-semibold text-slate-900">
               SVR Kernel Hyperparameters &amp; Dual Geometry
             </h3>
@@ -229,7 +246,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
             </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-xs">
             <h3 className="font-display text-sm font-semibold text-slate-900">
               Permutation Feature Sensitivity (%)
             </h3>
@@ -255,7 +272,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
 
       {selectedModel === 'rnn_ga' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-xs">
             <h3 className="font-display text-sm font-semibold text-slate-900">
               Genetic Algorithm &amp; Elman RNN Topology
             </h3>
@@ -287,7 +304,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
             </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-xs">
             <h3 className="font-display text-sm font-semibold text-slate-900">
               GA Fitness Convergence (Validation MSE Across Generations)
             </h3>
@@ -316,7 +333,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
 
       {selectedModel === 'hmm' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-xs">
             <h3 className="font-display text-sm font-semibold text-slate-900">
               Regime Emission Parameters &amp; Terminal Posterior Probabilities
             </h3>
@@ -349,7 +366,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
             </table>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-xs">
             <h3 className="font-display text-sm font-semibold text-slate-900">
               Markov Transition Matrix P(S_t = j | S_&#123;t-1&#125; = i)
             </h3>
@@ -383,7 +400,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
 
       {selectedModel === 'kalman' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-4 shadow-xs">
             <h3 className="font-display text-sm font-semibold text-slate-900">
               State-Space Variance Parameters &amp; Terminal State
             </h3>
@@ -416,7 +433,7 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
             </div>
           </div>
 
-          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 space-y-3 shadow-xs">
             <h3 className="font-display text-sm font-semibold text-slate-900">
               RTS Smoothed Latent Trend vs Observed Price
             </h3>
@@ -438,8 +455,69 @@ export const ModelDetailView: React.FC<ModelDetailViewProps> = ({
         </div>
       )}
 
+      {/* 500+ Words Academic Research Report Monograph for This Model */}
+      <section className="bg-white border border-slate-200 rounded-xl p-6 sm:p-7 space-y-5 shadow-xs">
+        <div className="border-b border-slate-200 pb-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <div>
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 border border-blue-200 rounded text-blue-700 text-[11px] font-semibold mb-1.5">
+              <BookOpen className="w-3.5 h-3.5" />
+              Detailed Academic Research Paper (~{academicPaper.wordCount} Words)
+            </div>
+            <h2 className="font-display text-lg font-bold text-slate-900">
+              {academicPaper.title}
+            </h2>
+          </div>
+          <div className="flex items-center gap-2 shrink-0">
+            <button
+              type="button"
+              onClick={() => downloadModelReportPdf(selectedModel, result)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-700 hover:bg-blue-800 rounded-lg transition-colors cursor-pointer"
+            >
+              <Printer className="w-3 h-3" />
+              Download PDF
+            </button>
+            <button
+              type="button"
+              onClick={() => downloadModelReportWord(selectedModel, result)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-700 hover:bg-indigo-800 rounded-lg transition-colors cursor-pointer"
+            >
+              <FileText className="w-3 h-3" />
+              Download Word (.doc)
+            </button>
+          </div>
+        </div>
+
+        {/* Paper Sections */}
+        <div className="space-y-5 text-sm text-slate-700 leading-relaxed">
+          {academicPaper.sections.map((sec, idx) => (
+            <div key={idx} className="space-y-2.5">
+              <h3 className="font-display text-sm font-bold text-slate-900 text-blue-900 border-b border-slate-100 pb-1">
+                {sec.heading}
+              </h3>
+              {sec.paragraphs.map((p, pIdx) => (
+                <p key={pIdx} className="text-justify leading-relaxed">
+                  {p}
+                </p>
+              ))}
+              {sec.equations && (
+                <div className="space-y-1.5 my-2">
+                  {sec.equations.map((eq, eqIdx) => (
+                    <div
+                      key={eqIdx}
+                      className="font-mono text-xs bg-slate-50 border border-slate-200 rounded px-3 py-2 text-slate-800 overflow-x-auto"
+                    >
+                      {eq}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      </section>
+
       {/* Horizon Table for Selected Model */}
-      <section className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+      <section className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-xs">
         <div className="px-5 py-3.5 border-b border-slate-200">
           <h3 className="font-display text-sm font-semibold text-slate-900">
             {m.shortName} Point Forecasts &amp; 95% Prediction Intervals
